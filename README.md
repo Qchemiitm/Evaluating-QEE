@@ -1,4 +1,4 @@
-# Deciphering the Potential of Qubit Efficient Encoding Algorithm for Multiple Applications
+# Quantum Simulation of Small Molecules for Multiple Applications
 
 ## Description
 This project explores the potential of qubit-efficient encoding (QEE) scheme for simulating molecular systems by 
