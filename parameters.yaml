@@ -1,0 +1,56 @@
+# !!! IMP: The first 10 lines are reserved for comments. PLEASE DO NOT REMOVE THEM. !!!
+# Allowed molecule values: Enter one of "H2", "BeH2", "C", "LiH", "H2O"
+# Allowed optimizer_label values: COBYLA, L-BFGS-B, SLSQP, SPSA.
+# Allowed entanglement_type values: linear (default), full
+# Allowed rotations values: "ry", ["ry","rz"]
+# Allowed run_es_solver: 1 (choose 1 to execute qEOM), 0 (-)
+# Allowed is_solve_exact: 1 (choose 1 to solve using NumpyMinimumEigenSolve), 0(-)
+# Allowed enable_debug values: 0, 1 (choose 1 to print debug logs)
+# Allowed distance values: list representing [start,end,step] or individual values e.g. [[1],[2]]
+#
+
+default:
+  molecule: "H2"
+  rotations: "ry"
+  entanglement: "cx"
+  entanglement_type: "linear"
+  depth: 2
+  optimizer_label: "COBYLA"
+  optimizer_maxiter: 300
+  qee_max_allowed_processes: 16
+  is_solve_exact: 1
+  enable_debug: 0
+H2:
+  distance: [0.1,2,0.1]
+  multiplicity: 1
+  freeze_core: 0
+  remove_orbitals: #[3, 4]
+  z2symmetry_reduction: {"QEE":[], "JW":[], "P":[]}
+  run_es_solver: 1
+LiH:
+  distance: [0.5,4,0.1]
+  multiplicity: 1
+  freeze_core: 1
+  remove_orbitals: [3, 4]
+  z2symmetry_reduction: {"QEE":[], "JW":[-1,1], "P":[-1,1]}
+  run_es_solver: 1
+C:
+  multiplicity: 3
+  freeze_core: 1
+  remove_orbitals: 
+  z2symmetry_reduction: 
+  run_es_solver: 1
+H2O:
+  distance: [[1]]
+  multiplicity: 1
+  freeze_core: 1
+  remove_orbitals: 
+  z2symmetry_reduction: {"QEE":[], "JW":[1,1,1,1], "P":[1,1]} 
+  run_es_solver: 0
+BeH2:
+  distance: [0.5,2.6,0.1]
+  multiplicity: 1
+  freeze_core: 1
+  remove_orbitals: [3] 
+  z2symmetry_reduction: {"QEE":[], "JW":[1,1,1,1], "P":[1,1]}
+  run_es_solver: 0
