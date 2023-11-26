@@ -247,7 +247,7 @@ def main():
 
         if is_debug == True:
             log.debug(es_result)
-        log.info(f"Ground state electronic dipole moment using mapper {mapper} for distance {distance}: {es_result.electronic_dipole_moment}")
+        log.info(f"Ground state electronic dipole moment using mapper {mapper} for distance {dist}: {es_result.electronic_dipole_moment}")
 
     dipole_gs[mapper] = gs_electronic_dipole_moment
     log.info(f"Solved for ground state energy using mapper {mapper}")

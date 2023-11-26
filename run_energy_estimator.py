@@ -164,7 +164,7 @@ def main():
 
     """
     ***************************************************************
-    Phase I: In this phase, we execute either the Ground state solver and qEOM 
+    Phase I: In this phase, we execute the Ground state solver and qEOM 
     using QEE as the mapper/transformation.
     ***************************************************************
     """
@@ -173,6 +173,7 @@ def main():
     log.info(f"Start of processing with QEE transformation ============= ")
     mapper='QEE'
     gs_energy = []
+    es_energy = []
     ansatz_printed = False
     apply_z2symmetry = z2symmetry_reduction[mapper]
     for dist in distance_list:
@@ -265,11 +266,38 @@ def main():
         #    log.debug(es_result)
         #log.info(f"Solved for ground state solver using mapper {mapper}")
 
+        ###
+        ### Solving for the excited state
+        ### 
+        if es_solver == True:
+
+            log.info(f"Setting up the ground state solver for {mapper} via qEOM... ")
+            gse = GroundStateEigensolver(qubit_converter=ee_qee.qubit_converter, solver=execute_vqe)
+            log.info(f"Ground state solver set for mapper {mapper}.")
+
+            log.info(f"Solving for excited state via qEOM for {mapper} ... ")
+            qeomSolver=QEOM(ground_state_solver=gse, excitations='sd')
+
+            curr_environ_val = os.environ['QISKIT_IN_PARALLEL']
+            log.info(f"Current value of QISKIT_IN_PARALLEL environmental variable: {curr_environ_val}")
+            os.environ['QISKIT_IN_PARALLEL'] = "True"  # pretends the code already runs in parallel
+            result=qeomSolver.solve(ee_qee.electronic_structure_problem)
+            os.environ['QISKIT_IN_PARALLEL'] = curr_environ_val
+
+            es_result = ee_qee.electronic_structure_problem.interpret(result)
+            if is_debug == True:
+                log.debug(es_result)
+
+            es_energy.append((es_result.total_energies.real[1], es_result.total_energies.real[2]))
+            log.info(f"1st and 2nd Excited state energies using mapper {mapper} for distance {dist}: {es_result.total_energies.real[1]} and {es_result.total_energies.real[2]}")
+
     # the energies_gs dictionary is used to compare energies of QEE, JW and P mappers using VQE
     energies_gs[mapper] = gs_energy
     # the energies_gs_classical_comp distionary is used to compare energies of QEE via VQE vs. JW and P mappers using classical eigen solvers
     energies_gs_classical_comp[mapper] = gs_energy
-    log.info(f"Solved for ground state energy using mapper {mapper}")
+    # the energies_es dictionary is used to hold the excited state energy values. For the comparison, appropriate datasets have to be prepared accordingly.
+    energies_es[mapper] = es_energy
+    log.info(f"Solved for ground state and excited state energy using mapper {mapper}")
 
     if len(distance_list) > 1:
         log.info(f"Plotting energy vs. interatomic distance for mapper {mapper} ...")
@@ -282,80 +310,12 @@ def main():
     min_gsenergy = min(gs_energy)
     min_gsenergy_index = gs_energy.index(min_gsenergy)
     min_gsenergy_dist = distance_list[min_gsenergy_index]
-    log.info(f"Minimum energy bond length for molecule {molecule} for {mapper} is: {min_gsenergy_dist}")
-    
-    ###
-    ### Solving for excited state for the minimum energy bond length identified from ground state solver
-    ### 
+    log.info(f"Bond length for minimum ground state energy for molecule {molecule} using {mapper} is: {min_gsenergy_dist}")
+    ### Identifying the excited state energy for the bond length corresponding to the minium ground state energy found in the above step.
     if es_solver == True:
+        min_esenergy = es_energy[min_gsenergy_index]
+        log.info(f"Excited state energy for bond length of minimum ground state energy for molecule {molecule} using {mapper} is: {min_esenergy}")
 
-        if molecule == 'H2':
-            geometry = [["H", [0, 0, 0]], ["H", [0, 0, min_gsenergy_dist]]]
-        elif molecule == 'LiH':
-            geometry = [["Li", [0, 0, 0]], ["H", [0, 0, min_gsenergy_dist]]]
-        elif molecule == 'H2O':
-            theta_0 = 104.5 ## angle in degrees
-            xdist = math.cos(math.radians(theta_0 / 2)) * min_gsenergy_dist
-            zdist = math.sin(math.radians(theta_0 / 2)) * min_gsenergy_dist
-            geometry = [["O", [0, 0, 0]], ["H", [xdist, 0, zdist]], ["H", [xdist, 0, -zdist]]]
-        elif molecule == 'BeH2':
-            geometry = [["Be", [0, 0, 0]], ["H", [0, 0, min_gsenergy_dist]], ["H", [0, 0, -min_gsenergy_dist]]]    
-        else:
-            pass ## the geometry is already set for C atom when computing ground state energy
-        log.info(f"Geometry with interatomic distance is: {geometry}")
-
-        ee_qee = EnergyEstimator(geometry, multiplicity, freeze_core, remove_orbitals, debug=is_debug)
-        ee_qee.set_mapper(mapper=mapper, z2symmetry_reduction=apply_z2symmetry, qee_max_allowed_processes = qee_max_allowed_processes, debug=is_debug)
-        qubit_op, z2_symmetries = ee_qee.get_hamiltonian_op(debug=is_debug)
-        
-        num_particles = ee_qee.electronic_structure_problem.num_particles
-        num_spin_orbitals = ee_qee.electronic_structure_problem.num_spin_orbitals
-        num_qubits = qubit_op.num_qubits
-
-        #print(qubit_op)
-        log.info(f"Number of particles:  {num_particles}, Number of spin orbitals: {num_spin_orbitals}, Number of qubits: {num_qubits}")
-
-        init_state=None
-        """
-        if  outputpath_exists == True:
-        qcex = qce(init_state,ee.electronic_structure_problem.num_spin_orbitals)
-        qcex.draw_circuit(outputfilepath + '/' + 'initial_state.png')
-        """
-
-        ansatz = ee_qee.build_ansatz(num_qubits, init_state, rotations, entanglement, entanglement_type, depth, debug=is_debug)
-
-        #execute VQE algorithm for the ideal simulator
-        qcex = qce(QuantumCircuit(), num_qubits)
-        ## ignore noise model and coupling map as they are not applicable for ideal simulator
-        ideal_backend, _, _ = qcex.get_backend(is_simulator=bool(is_simulator), 
-                                                                simulator_type='AER_STATEVEVCTOR',
-                                                                noise_model_device=None
-                                                            )
-                                                            
-        myoptimizer = EnergyEstimator.get_optimizer(optimizer_label=optimizer_label, 
-                                                    maxiter = optimizer_maxiter,
-                                                    debug=is_debug)
-
-        log.info(f"Setting up the ground state solver for {mapper} via qEOM... ")
-        gse = GroundStateEigensolver(qubit_converter=ee_qee.qubit_converter, solver=execute_vqe)
-        log.info(f"Ground state solver set for mapper {mapper}.")
-
-        log.info(f"Solving for excited state via qEOM for {mapper} ... ")
-        qeomSolver=QEOM(ground_state_solver=gse, excitations='sd')
-
-        curr_environ_val = os.environ['QISKIT_IN_PARALLEL']
-        log.info(f"Current value of QISKIT_IN_PARALLEL environmental variable: {curr_environ_val}")
-        os.environ['QISKIT_IN_PARALLEL'] = "True"  # pretends the code already runs in parallel
-        result=qeomSolver.solve(ee_qee.electronic_structure_problem)
-        os.environ['QISKIT_IN_PARALLEL'] = curr_environ_val
-
-        es_result = ee_qee.electronic_structure_problem.interpret(result)
-        if is_debug == True:
-            log.debug(es_result)
-
-        energies_es[mapper] = (min_gsenergy_dist, es_result.total_energies.real[1], es_result.total_energies.real[2])
-        log.info(f"The excited state output including interatomic distance for mapper {mapper} is: {energies_es[mapper]}")
-    
     """
     ***************************************************************
     Phase II: In this phase, we execute either the Ground state solver and qEOM 
@@ -369,6 +329,7 @@ def main():
     for mapper in mapper_list:
         log.info(f"Start of processing with {mapper} transformation ============= ")
         gs_energy = []
+        es_energy = []
         exact_energy = []
         init_state_printed = False
         ansatz_printed = False
@@ -388,11 +349,13 @@ def main():
             elif molecule == 'BeH2':
                 geometry = [["Be", [0, 0, 0]], ["H", [0, 0, dist]], ["H", [0, 0, -dist]]]
                 # special case of Z2 symmetry for JW and P mappers when dist = 2 Angstrom
-                if dist > 1.9 and dist <= 2.0: 
+                if dist > 1.9 and dist <= 2.0 and len(z2symmetry_reduction[mapper])>0: 
                     if mapper == "JW":
                         apply_z2symmetry = [1,1,1,1,1]
                     elif mapper == "P":
                         apply_z2symmetry = [1,1,1]
+                else:
+                    apply_z2symmetry = z2symmetry_reduction[mapper]
             else:    
                 pass
             log.info(f"Geometry with interatomic distance is: {geometry}")
@@ -423,13 +386,24 @@ def main():
                 init_state_printed = True
                 log.info(f"Initial state printed. Check for file initial_state_{mapper}_{molecule}.png in the output directory.")
 
-            ansatz = ee_map.build_ansatz(num_qubits, init_state, rotations, entanglement, entanglement_type, depth, debug=is_debug)
-            if outputpath_exists == True and ansatz_printed == False:
-                qcex = qce(ansatz, num_spin_orbitals)
-                qcex.draw_circuit(in_filename=outputfilepath + '/' + 'ansatz_' + mapper + '_' + molecule + '.png', is_decompose=True, in_output_type='mpl')
-                #ansatz.decompose().draw(output='mpl',filename=outputfilepath + '/' + 'ansatz_' + mapper + '_' + molecule + '.png')
-                ansatz_printed = True
-                log.info(f"Ansatz printed. Check for file ansatz_{mapper}_{molecule}.png in the output directory.")
+            if molecule == "BeH2":
+                ansatz = ee_map.build_ucc_ansatz(init_state, depth, debug=is_debug)
+                """
+                if outputpath_exists == True and ansatz_printed == False:
+                    qcex = qce(ansatz, num_spin_orbitals)
+                    qcex.draw_circuit(in_filename=outputfilepath + '/' + 'ansatz_ucc_' + mapper + '_' + molecule + '.png', is_decompose=True, in_output_type='mpl')
+                    #ansatz.decompose().draw(output='mpl',filename=outputfilepath + '/' + 'ansatz_' + mapper + '_' + molecule + '.png')
+                    ansatz_printed = True
+                    log.info(f"Ansatz printed. Check for file ansatz_ucc_{mapper}_{molecule}.png in the output directory.")
+                """
+            else:    
+                ansatz = ee_map.build_ansatz(num_qubits, init_state, rotations, entanglement, entanglement_type, depth, debug=is_debug)
+                if outputpath_exists == True and ansatz_printed == False:
+                    qcex = qce(ansatz, num_spin_orbitals)
+                    qcex.draw_circuit(in_filename=outputfilepath + '/' + 'ansatz_' + mapper + '_' + molecule + '.png', is_decompose=True, in_output_type='mpl')
+                    #ansatz.decompose().draw(output='mpl',filename=outputfilepath + '/' + 'ansatz_' + mapper + '_' + molecule + '.png')
+                    ansatz_printed = True
+                    log.info(f"Ansatz printed. Check for file ansatz_{mapper}_{molecule}.png in the output directory.")
 
             #execute VQE algorithm for the ideal simulator
             qcex = qce(QuantumCircuit(), num_qubits)
@@ -473,83 +447,57 @@ def main():
                 exact_energy.append(exact_eigen_value + np.real(es_result.extracted_transformer_energy + es_result.nuclear_repulsion_energy))
                 if is_debug == True:
                     print(exact_eigen_value)
-        
+
+            ### Solving for the excited state
+            if es_solver == True:
+                
+                log.info(f"Setting up the ground state solver for mapper {mapper} ... ")
+                gse = GroundStateEigensolver(qubit_converter=ee_map.qubit_converter, solver=execute_vqe)
+                log.info(f"Ground state solver set for mapper {mapper}.")
+
+                log.info(f"Solving for excited state via qEOM for mapper {mapper} ... ")
+                qeomSolver=QEOM(ground_state_solver=gse, excitations='sd')
+
+                os.environ['QISKIT_IN_PARALLEL'] = "True"  # pretends the code already runs in parallel
+                result=qeomSolver.solve(ee_map.electronic_structure_problem)
+                os.environ['QISKIT_IN_PARALLEL'] = curr_environ_val
+                
+                es_result = ee_map.electronic_structure_problem.interpret(result)  
+                es_energy.append((es_result.total_energies.real[1], es_result.total_energies.real[2]))
+                log.info(f"1st and 2nd Excited state energies using mapper {mapper} for distance {dist}: {es_result.total_energies.real[1]} and {es_result.total_energies.real[2]}")
+
         energies_gs[mapper] = gs_energy
         energies_gs_classical_comp[mapper+'_EX'] = exact_energy
-
-        ### Solving for excited state for the minimum energy bond length identified from ground state solver using QEE mapper
-        if es_solver == True:
-
-            log.info(f"Minimum energy bond length for molecule {molecule} is: {min_gsenergy_dist}")
-
-            if molecule == 'H2':
-                geometry = [["H", [0, 0, 0]], ["H", [0, 0, min_gsenergy_dist]]]
-            elif molecule == 'LiH':
-                geometry = [["Li", [0, 0, 0]], ["H", [0, 0, min_gsenergy_dist]]]
-            elif molecule == 'H2O':
-                theta_0 = 104.5 ## angle in degrees
-                xdist = math.cos(math.radians(theta_0 / 2)) * min_gsenergy_dist
-                zdist = math.sin(math.radians(theta_0 / 2)) * min_gsenergy_dist
-                geometry = [["O", [0, 0, 0]], ["H", [xdist, 0, zdist]], ["H", [xdist, 0, -zdist]]]
-            elif molecule == 'BeH2':
-                geometry = [["Be", [0, 0, 0]], ["H", [0, 0, min_gsenergy_dist]], ["H", [0, 0, -min_gsenergy_dist]]]
-            else:
-                pass
-            log.info(f"Geometry with interatomic distance is: {geometry}")
-
-            ee_map = EnergyEstimator(geometry, multiplicity, freeze_core, remove_orbitals, debug=is_debug)
-            ee_map.set_mapper(mapper=mapper, z2symmetry_reduction=apply_z2symmetry, debug=is_debug)
-            qubit_op, z2_symmetries = ee_map.get_hamiltonian_op(debug=is_debug)
-            
-            num_particles = ee_map.electronic_structure_problem.num_particles
-            num_spin_orbitals = ee_map.electronic_structure_problem.num_spin_orbitals
-            num_qubits = qubit_op.num_qubits
-
-            #print(qubit_op)
-            log.info(f"Number of particles:  {num_particles}, Number of spin orbitals: {num_spin_orbitals}, Number of qubits: {num_qubits}")
-
-            init_state=ee_map.set_initial_state(debug=is_debug)
-
-            ansatz = ee_map.build_ansatz(num_qubits, init_state, rotations, entanglement, entanglement_type, depth, debug=is_debug)
-            
-            #execute VQE algorithm for the ideal simulator
-            qcex = qce(QuantumCircuit(), num_qubits)
-            ## ignore noise model and coupling map as they are not applicable for ideal simulator
-            ideal_backend, _, _ = qcex.get_backend(is_simulator=bool(is_simulator), 
-                                                                    simulator_type='AER_STATEVEVCTOR',
-                                                                    noise_model_device=None
-                                                                )
-                                                                
-            myoptimizer = EnergyEstimator.get_optimizer(optimizer_label=optimizer_label, 
-                                                        maxiter = optimizer_maxiter,
-                                                        debug=is_debug)
-
-            execute_vqe = variational_eigen_solver(ansatz, optimizer=myoptimizer, 
-                                                    quantum_instance=ideal_backend)
-
-            log.info(f"Setting up the ground state solver for mapper {mapper} ... ")
-            gse = GroundStateEigensolver(qubit_converter=ee_map.qubit_converter, solver=execute_vqe)
-            log.info(f"Ground state solver set for mapper {mapper}.")
-
-            log.info(f"Solving for excited state via qEOM for mapper {mapper} ... ")
-            qeomSolver=QEOM(ground_state_solver=gse, excitations='sd')
-
-            os.environ['QISKIT_IN_PARALLEL'] = "True"  # pretends the code already runs in parallel
-            result=qeomSolver.solve(ee_map.electronic_structure_problem)
-            os.environ['QISKIT_IN_PARALLEL'] = curr_environ_val
-            
-            es_result = ee_map.electronic_structure_problem.interpret(result)        
-            energies_es[mapper] = (min_gsenergy_dist, es_result.total_energies.real[1], es_result.total_energies.real[2])
-
-            log.info(f"The excited state output including interatomic distance for mapper {mapper} is: {energies_es[mapper]}")
+        energies_es[mapper] = es_energy
 
     if len(distance_list) > 1:
+        # plotting ground state energy for QEE, JW and Parity mappers
         log.info(f"Plotting energy vs. interatomic distance for different mappers ...")
         energyplot_comp_location = outputfilepath + '/' + 'energyplot_compare_' + molecule +'.png'
         plt2=plot_energy_graph(distances=distance_list, energies=energies_gs, debug=is_debug)
         plt2.savefig(energyplot_comp_location)
         plt2.close()
 
+        # zooming into plot for ground state energy for QEE, JW and Parity mappers
+        # here, we consider interatomic distance 0.3 Angstrom about the minimum energy distance point 
+        # identified by QEE
+        inset_delta = math.ceil(0.3/step_distance)
+        inset_start_index = min_gsenergy_index - inset_delta
+        inset_end_index = min_gsenergy_index + inset_delta
+        # form the new list for plotting
+        inset_distance_list = distance_list[inset_start_index:inset_end_index+1]
+        inset_energies_gs = dict()
+        for key,val in energies_gs.items():
+            log.info(f"Adding data for inset graph for mapper {key} ...")
+            inset_energies_gs[key] = val[inset_start_index:inset_end_index+1]
+        # let us plot this data
+        log.info(f"Zooming into energy vs. interatomic distance plot for different mappers ...")
+        energyplot_inset_comp_location = outputfilepath + '/' + 'energyplot_inset_compare_' + molecule +'.png'
+        plt3=plot_energy_graph(distances=inset_distance_list, energies=inset_energies_gs, debug=is_debug)
+        plt3.savefig(energyplot_inset_comp_location)
+        plt3.close()
+
+    # plotting ground state energy for QEE as compared with the exact classical solver
     if len(distance_list) > 1:
         log.info(f"Plotting energy vs. interatomic distance for different mappers with exact eigen solver ...")
         energyplot_comp_location_exact = outputfilepath + '/' + 'energyplot_compare_exact_' + molecule +'.png'
@@ -557,9 +505,35 @@ def main():
         plt2.savefig(energyplot_comp_location_exact)
         plt2.close()
 
+    # plotting excited state energy values for QEE, JW and Parity as well as comparing
+    # excited state of QEE with ground state energy values of QEE
+    if len(distance_list) > 1 and es_solver == True:
+        # identify the 1st excited state energy values across different mappers
+        energies_es_1st = dict()
+        energies_es_1st["QEE"] = [e[0] for e in energies_es["QEE"]]
+        for mapper in mapper_list:
+            energies_es_1st[mapper] = [e[0] for e in energies_es[mapper]]
+
+        log.info(f"Plotting 1st excited state energy vs. interatomic distance for different mappers ...")
+        energyplot_comp_location = outputfilepath + '/' + '1st_excited_energyplot_compare_' + molecule +'.png'
+        plt2=plot_energy_graph(distances=distance_list, energies=energies_es_1st, debug=is_debug)
+        plt2.savefig(energyplot_comp_location)
+        plt2.close()
+
+        # identify the 1st excited state and ground state energy values for QEE
+        energies_gs_es_1st = dict()
+        energies_gs_es_1st["QEE_GS"] = [g for g in energies_gs["QEE"]]
+        energies_gs_es_1st["QEE_ES"] = [e[0] for e in energies_es["QEE"]]
+
+        log.info(f"Plotting energy vs. interatomic distance for different mappers with exact eigen solver ...")
+        energyplot_comp_location_exact = outputfilepath + '/' + 'energyplot_compare_gs_es_' + molecule +'.png'
+        plt2=plot_energy_graph(distances=distance_list, energies=energies_gs_es_1st, debug=is_debug)
+        plt2.savefig(energyplot_comp_location_exact)
+        plt2.close()
+
     if is_debug == True:
         log.debug(f"Ground State values: {energies_gs}")
-        log.debug(f"Ground State values: {energies_gs_classical_comp}")
+        log.debug(f"Ground State values with exact classical: {energies_gs_classical_comp}")
         log.debug(f"Excited state values: {energies_es}")
 
     print("====================================================================")
@@ -575,13 +549,26 @@ def main():
             print(f"The ground state value for molecule {molecule} having bond length {min_gsenergy_dist} using mapper {mapper} and solved via exact eigen solver is: {energies_gs_classical_comp[mapper+'_EX'][min_gsenergy_index]}")
 
     if es_solver == True:
-        print(f"The 1st excited state value for molecule {molecule} having bond length {min_gsenergy_dist} using mapper QEE is: {energies_es['QEE'][1]}")
+        print(f"The 1st excited state value for molecule {molecule} having bond length {min_gsenergy_dist} using mapper QEE is: {energies_es['QEE'][min_gsenergy_index][0]}")
         for mapper in mapper_list:
-            print(f"The 1st excited state value for molecule {molecule} having bond length {min_gsenergy_dist} using mapper {mapper} is: {energies_es[mapper][1]}")
+            print(f"The 1st excited state value for molecule {molecule} having bond length {min_gsenergy_dist} using mapper {mapper} is: {energies_es[mapper][min_gsenergy_index][0]}")
         
-        print(f"The 2nd excited state value for molecule {molecule} having bond length {min_gsenergy_dist} using mapper QEE is: {energies_es['QEE'][2]}")
+        print(f"The 2nd excited state value for molecule {molecule} having bond length {min_gsenergy_dist} using mapper QEE is: {energies_es['QEE'][min_gsenergy_index][1]}")
         for mapper in mapper_list:
-            print(f"The 2nd excited state value for molecule {molecule} having bond length {min_gsenergy_dist} using mapper {mapper} is: {energies_es[mapper][2]}")
+            print(f"The 2nd excited state value for molecule {molecule} having bond length {min_gsenergy_dist} using mapper {mapper} is: {energies_es[mapper][min_gsenergy_index][1]}")
+    
+    if len(distance_list) > 1:
+        print(f"Identifying the potential depth of the molecule {molecule} ...")
+        max_distance_index = len(distance_list)-1
+        potential_depth = energies_gs["QEE"][max_distance_index] - min_gsenergy
+        print(f"The potential depth of molecule {molecule} when using QEE mapper: {potential_depth}")
+        for mapper in mapper_list:
+            gs_energy = energies_gs[mapper]
+            min_gsenergy_mapper = min(gs_energy)
+            min_gsenergy_mapper_index = gs_energy.index(min_gsenergy_mapper)
+            potential_depth = energies_gs[mapper][max_distance_index] - energies_gs[mapper][min_gsenergy_mapper_index]
+            print(f"The potential depth of molecule {molecule} when using {mapper} mapper: {potential_depth}")
+
     print("====================================================================")
 
     log.info(f"Program execution completed.")

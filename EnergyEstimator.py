@@ -20,6 +20,7 @@ from qiskit_nature.transformers.second_quantization.electronic import FreezeCore
 from qiskit_nature.circuit.library import HartreeFock
 from qiskit.circuit.library import TwoLocal
 from qiskit.algorithms import VQE, NumPyMinimumEigensolver
+from qiskit_nature.circuit.library.ansatzes import UCC
 from qiskit.algorithms.optimizers import L_BFGS_B, COBYLA, SLSQP, SPSA
 
 from qee import groupedFermionicOperator as groupFOp
@@ -304,6 +305,38 @@ class EnergyEstimator:
             log.debug(f"End of build_ansatz method.")
         
         log.info(f"Ansatz set.")
+        return(ansatz)
+
+    def build_ucc_ansatz(self, initial_state, depth=2, debug=False):
+        """
+        Description: This method uses the UCC module (specifically UCCSD) to build the Ansatz.
+        Input arguments:
+        1. initial_state:
+        2. depth/reps of the ansatz circuit
+        """
+        
+        log.info(f"Inside build_ucc_ansatz method.")
+
+        # define the ansatz based on UCCSD
+        excitations = 'sd'
+        ansatz = UCC(excitations=excitations,
+                    num_particles=self.electronic_structure_problem.num_particles,
+                    num_spin_orbitals=self.electronic_structure_problem.num_spin_orbitals,
+                    #initial_state=initial_state,
+                    qubit_converter=self.qubit_converter,
+                    reps=depth
+                )
+    
+        # add the initial state to ansatz, if applicable
+        if initial_state is not None:
+            ansatz.compose(initial_state, front=True, inplace=True)
+
+        if debug == True:
+            log.debug(f"Printing UCC ansatz ...")
+            log.debug(ansatz)
+            log.debug(f"End of build_ucc_ansatz method.")
+        
+        log.info(f"UCCSD Ansatz set.")
         return(ansatz)
 
 def exact_eigen_solver(hamiltonian_op):
