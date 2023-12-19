@@ -387,7 +387,7 @@ def main():
                 log.info(f"Initial state printed. Check for file initial_state_{mapper}_{molecule}.png in the output directory.")
 
             if molecule == "BeH2":
-                ansatz = ee_map.build_ucc_ansatz(init_state, depth, debug=is_debug)
+                ansatz = ee_map.build_ucc_ansatz(init_state, depth=5, debug=is_debug)
                 """
                 if outputpath_exists == True and ansatz_printed == False:
                     qcex = qce(ansatz, num_spin_orbitals)

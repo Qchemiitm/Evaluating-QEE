@@ -48,7 +48,7 @@ H2O:
   z2symmetry_reduction: {"QEE":[], "JW":[1,1,1,1], "P":[1,1]} 
   run_es_solver: 0
 BeH2:
-  distance: [0.5,4,0.1]
+  distance: [0.5,4,0.2]
   multiplicity: 1
   freeze_core: 1
   remove_orbitals:  
